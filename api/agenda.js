@@ -44,7 +44,7 @@ module.exports=async(req,res)=>{
         const record=JSON.parse(s);
         record.person=currentName(record.person);
         return record;
-      }).filter(r=>admin||r.person===name);
+      }).filter(r=>admin||r.person===name||r.shared===true);
       return res.json({name,records:rows});
     }
     if(method!=='POST'&&!admin)return fail(403,'Solo Renzo puede modificar registros.');
@@ -56,11 +56,12 @@ module.exports=async(req,res)=>{
       const person=admin?currentName(b.person):name;
       if(!names.includes(person)||!/^\d{4}-\d\d-\d\d$/.test(b.date)||!Number.isFinite(Date.parse(b.date))||new Date(b.date).toISOString().slice(0,10)!==b.date||
         !['Completada','En proceso'].includes(b.status)||![['title',140],['detail',1600]].every(([f,max])=>typeof b[f]==='string'&&b[f].trim()&&b[f].length<=max))return fail(400,'Revisa los datos de la actividad.');
-      row={id,person,date:b.date,title:b.title.trim(),detail:b.detail.trim(),status:b.status,time:new Date().toLocaleTimeString('es-PE',{timeZone:'America/Lima',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}),rev:1};
+      row={id,person,shared:admin && b.shared===true,date:b.date,title:b.title.trim(),detail:b.detail.trim(),status:b.status,time:new Date().toLocaleTimeString('es-PE',{timeZone:'America/Lima',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}),rev:1};
     }
     if(create){await redis('HSET',table,id,JSON.stringify(row));return res.status(201).json({ok:true})}
     const current=await redis('HGET',table,id);if(!current)return fail(404,'La actividad ya no existe.');
     const old=JSON.parse(current);if(old.rev!==b.rev)return fail(409,'La actividad cambió. Actualiza la agenda.');
+    if(!remove && b.shared===undefined)row.shared=old.shared===true;
     if(!remove)Object.assign(row,{time:old.time,rev:old.rev+1,changed:new Date().toISOString()});
     const script="if redis.call('HGET',KEYS[1],ARGV[1])~=ARGV[2] then return 0 end; if ARGV[3]=='' then redis.call('HDEL',KEYS[1],ARGV[1]) else redis.call('HSET',KEYS[1],ARGV[1],ARGV[3]) end; return 1";
     if(!await redis('EVAL',script,1,table,id,current,remove?'':JSON.stringify(row)))return fail(409,'La actividad cambió. Actualiza la agenda.');
